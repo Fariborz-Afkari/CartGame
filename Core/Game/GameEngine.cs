@@ -4,50 +4,78 @@ using CardGame.Core.Players;
 namespace CardGame.Core.Game
 {
     /// <summary>
-    /// Coordinates game flow.
+    /// Coordinates the flow of a game.
     ///
-    /// GameEngine receives GameAction instances and produces GameEvent instances.
-    /// It does not expose the old action-based API.
+    /// GameEngine:
+    /// - receives GameAction instances
+    /// - validates turn ownership
+    /// - delegates gameplay rules to GameRules
+    /// - records and publishes GameEvent instances
+    /// - controls turn progression and match lifecycle
+    ///
+    /// GameEngine does not contain card-specific rules.
     /// </summary>
     public sealed class GameEngine
     {
+        private readonly int _startingPlayerId;
+
         public GameState State { get; }
 
         /// <summary>
-        /// Raised whenever the engine produces a game event.
+        /// Raised whenever a new game event is produced.
         /// </summary>
         public event Action<GameEvent> EventProduced;
 
-        public GameEngine(string gameId, int startingPlayerId = 0)
+        public GameEngine(
+            string gameId,
+            int startingPlayerId = 0)
         {
-            State = new GameState(gameId, startingPlayerId);
+            if (string.IsNullOrWhiteSpace(gameId))
+                throw new ArgumentException(
+                    "Game id cannot be empty.",
+                    nameof(gameId));
+
+            _startingPlayerId = startingPlayerId;
+
+            State = new GameState(
+                gameId,
+                startingPlayerId);
         }
 
         /// <summary>
-        /// Starts a new match.
+        /// Starts a new match using the default sample players.
+        ///
+        /// Player creation is currently kept here because the project
+        /// does not yet have a separate match/player setup layer.
         /// </summary>
         public void StartMatch()
         {
             State.Reset();
 
-            State.AddPlayer(new PlayerState(0, "You", true));
-            State.AddPlayer(new PlayerState(1, "AI-1", false));
-            State.AddPlayer(new PlayerState(2, "AI-2", false));
-            State.AddPlayer(new PlayerState(3, "AI-3", false));
+            AddDefaultPlayers();
+
+            if (State.FindPlayer(_startingPlayerId) == null)
+            {
+                throw new InvalidOperationException(
+                    $"Starting player {_startingPlayerId} does not exist.");
+            }
 
             State.Phase = GamePhase.TurnStart;
-            State.CurrentPlayerId = 0;
+            State.IsGameOver = false;
+            State.CurrentPlayerId = _startingPlayerId;
             State.TurnNumber = 1;
+            State.WinnerId = null;
 
-            Emit(GameEvent.MatchStarted("Match started."));
-            StartTurn(0);
+            Emit(GameEvent.MatchStarted());
+
+            StartTurn(_startingPlayerId);
         }
 
         /// <summary>
-        /// Submits an action to the game engine.
+        /// Submits an action requested by a player or AI.
         ///
-        /// The engine validates whether the action is allowed,
-        /// resolves it through GameRules, and emits resulting events.
+        /// Returns true when the action was accepted and processed.
+        /// Returns false when the action was rejected.
         /// </summary>
         public bool SubmitAction(GameAction action)
         {
@@ -56,18 +84,18 @@ namespace CardGame.Core.Game
 
             if (State.IsGameOver)
             {
-                Emit(GameEvent.ActionRejected(
+                Reject(
                     action.PlayerId,
-                    "The match has already ended."));
+                    "The match has already ended.");
 
                 return false;
             }
 
             if (!IsPlayerTurn(action.PlayerId))
             {
-                Emit(GameEvent.ActionRejected(
+                Reject(
                     action.PlayerId,
-                    "It is not this player's turn."));
+                    "It is not this player's turn.");
 
                 return false;
             }
@@ -75,77 +103,88 @@ namespace CardGame.Core.Game
             switch (action.Type)
             {
                 case GameActionType.DrawCard:
+                    return ResolveDrawCard(action);
+
                 case GameActionType.PlayCard:
-                    return ResolveGameplayAction(action);
+                    return ResolvePlayCard(action);
 
                 case GameActionType.EndTurn:
                     return EndTurn(action.PlayerId);
 
                 default:
-                    Emit(GameEvent.ActionRejected(
+                    Reject(
                         action.PlayerId,
-                        "Unsupported game action."));
+                        "Unsupported game action.");
 
                     return false;
             }
         }
 
-        private bool ResolveGameplayAction(GameAction action)
+        /// <summary>
+        /// Handles a draw-card request.
+        ///
+        /// The current Core model does not yet contain a Deck/Hand system,
+        /// therefore no card can be drawn yet.
+        /// </summary>
+        private bool ResolveDrawCard(GameAction action)
         {
-            bool resolved = GameRules.Resolve(State, action);
-
-            if (!resolved)
+            if (!GameRules.Resolve(State, action))
             {
-                Emit(GameEvent.ActionRejected(
+                Reject(
                     action.PlayerId,
-                    "The action is not valid."));
+                    "The card cannot be drawn.");
+
                 return false;
             }
 
-            // GameRules is responsible for changing the state.
-            // GameEngine is responsible for emitting domain events
-            // and advancing the game flow.
+            /*
+             * A CardDrawn event will be emitted here once the Core model
+             * has a real Deck/Hand implementation and the resolved card
+             * id can be obtained from the resulting state.
+             *
+             * We intentionally do not fabricate a card id here.
+             */
 
-            switch (action.Type)
-            {
-                case GameActionType.DrawCard:
-                    if (!action.CardId.HasValue)
-                    {
-                        Emit(GameEvent.ActionRejected(
-                            action.PlayerId,
-                            "DrawCard did not produce a card id."));
-
-                        return false;
-                    }
-
-                    Emit(GameEvent.CardDrawn(
-                        action.PlayerId,
-                        action.CardId.Value));
-
-                    return true;
-
-                case GameActionType.PlayCard:
-                    if (!action.CardId.HasValue)
-                    {
-                        Emit(GameEvent.ActionRejected(
-                            action.PlayerId,
-                            "PlayCard requires a card id."));
-
-                        return false;
-                    }
-
-                    Emit(GameEvent.CardPlayed(
-                        action.PlayerId,
-                        action.CardId.Value,
-                        action.TargetPlayerId));
-
-                    return true;
-
-                default:
-                    return false;
-            }
+            return true;
         }
 
+        /// <summary>
+        /// Handles a play-card request.
+        /// </summary>
+        private bool ResolvePlayCard(GameAction action)
+        {
+            if (!action.CardId.HasValue)
+            {
+                Reject(
+                    action.PlayerId,
+                    "PlayCard requires a card id.");
+
+                return false;
+            }
+
+            if (!GameRules.Resolve(State, action))
+            {
+                Reject(
+                    action.PlayerId,
+                    "The card cannot be played.");
+
+                return false;
+            }
+
+            Emit(GameEvent.CardPlayed(
+                action.PlayerId,
+                action.CardId.Value,
+                action.TargetPlayerId));
+
+            CheckGameOver();
+
+            return true;
+        }
+
+        /// <summary>
+        /// Ends the current player's turn and advances to the next
+        /// living player.
+        /// </summary>
         private bool EndTurn(int playerId)
         {
             Emit(GameEvent.TurnEnded(playerId));
@@ -153,7 +192,8 @@ namespace CardGame.Core.Game
             if (CheckGameOver())
                 return true;
 
-            int nextPlayerId = FindNextLivingPlayer(playerId);
+            int nextPlayerId =
+                FindNextLivingPlayer(playerId);
 
             if (nextPlayerId < 0)
             {
@@ -163,31 +203,55 @@ namespace CardGame.Core.Game
 
             State.CurrentPlayerId = nextPlayerId;
             State.TurnNumber++;
+
             StartTurn(nextPlayerId);
 
             return true;
         }
 
+        /// <summary>
+        /// Starts a player's turn.
+        /// </summary>
         private void StartTurn(int playerId)
         {
+            PlayerState player =
+                State.FindPlayer(playerId);
+
+            if (player == null || player.Health <= 0)
+            {
+                EndMatch(null);
+                return;
+            }
+
             State.Phase = GamePhase.Turn;
 
             Emit(GameEvent.TurnStarted(playerId));
         }
 
+        /// <summary>
+        /// Determines whether the specified player is allowed to act.
+        /// </summary>
         private bool IsPlayerTurn(int playerId)
         {
+            if (State.IsGameOver)
+                return false;
+
             if (State.Phase != GamePhase.Turn)
                 return false;
 
             if (State.CurrentPlayerId != playerId)
                 return false;
 
-            PlayerState player = State.FindPlayer(playerId);
+            PlayerState player =
+                State.FindPlayer(playerId);
 
-            return player != null && player.Health > 0;
+            return player != null &&
+                   player.Health > 0;
         }
 
+        /// <summary>
+        /// Finds the next living player in circular order.
+        /// </summary>
         private int FindNextLivingPlayer(int currentPlayerId)
         {
             if (State.Players.Count == 0)
@@ -207,12 +271,16 @@ namespace CardGame.Core.Game
             if (currentIndex < 0)
                 return -1;
 
-            for (int offset = 1; offset <= State.Players.Count; offset++)
+            for (int offset = 1;
+                 offset <= State.Players.Count;
+                 offset++)
             {
                 int index =
-                    (currentIndex + offset) % State.Players.Count;
+                    (currentIndex + offset) %
+                    State.Players.Count;
 
-                PlayerState player = State.Players[index];
+                PlayerState player =
+                    State.Players[index];
 
                 if (player.Health > 0)
                     return player.Id;
@@ -221,10 +289,22 @@ namespace CardGame.Core.Game
             return -1;
         }
 
+        /// <summary>
+        /// Checks whether the match has reached a terminal state.
+        /// </summary>
         private bool CheckGameOver()
         {
-            PlayerState human = State.FindPlayer(0);
+            if (State.IsGameOver)
+                return true;
 
+            PlayerState human =
+                State.FindPlayer(0);
+
+            /*
+             * The current sample game has player 0 as the human player.
+             * This will later be replaced by a more generic win-condition
+             * system when game-specific rules are introduced.
+             */
             if (human == null || human.Health <= 0)
             {
                 EndMatch(null);
@@ -236,7 +316,8 @@ namespace CardGame.Core.Game
 
             for (int i = 0; i < State.Players.Count; i++)
             {
-                PlayerState player = State.Players[i];
+                PlayerState player =
+                    State.Players[i];
 
                 if (player.Health > 0)
                 {
@@ -254,8 +335,14 @@ namespace CardGame.Core.Game
             return false;
         }
 
+        /// <summary>
+        /// Ends the match and publishes the final event.
+        /// </summary>
         private void EndMatch(int? winnerId)
         {
+            if (State.IsGameOver)
+                return;
+
             State.WinnerId = winnerId;
             State.IsGameOver = true;
             State.Phase = GamePhase.GameOver;
@@ -263,10 +350,60 @@ namespace CardGame.Core.Game
             Emit(GameEvent.MatchEnded(winnerId));
         }
 
+        /// <summary>
+        /// Adds the current sample game's players.
+        ///
+        /// This is temporary infrastructure. Later this should be moved
+        /// to a match configuration / player factory.
+        /// </summary>
+        private void AddDefaultPlayers()
+        {
+            State.AddPlayer(
+                new PlayerState(
+                    0,
+                    "You",
+                    true));
+
+            State.AddPlayer(
+                new PlayerState(
+                    1,
+                    "AI-1",
+                    false));
+
+            State.AddPlayer(
+                new PlayerState(
+                    2,
+                    "AI-2",
+                    false));
+
+            State.AddPlayer(
+                new PlayerState(
+                    3,
+                    "AI-3",
+                    false));
+        }
+
+        /// <summary>
+        /// Records an event in GameState and notifies listeners.
+        /// </summary>
         private void Emit(GameEvent gameEvent)
         {
             State.AddEvent(gameEvent);
+
             EventProduced?.Invoke(gameEvent);
+        }
+
+        /// <summary>
+        /// Creates and publishes an ActionRejected event.
+        /// </summary>
+        private void Reject(
+            int playerId,
+            string message)
+        {
+            Emit(
+                GameEvent.ActionRejected(
+                    playerId,
+                    message));
         }
     }
 }
