@@ -110,22 +110,26 @@ namespace CardGame.Presentation.Game
         // Match
         // --------------------------------------------------
 
-        // --------------------------------------------------
-        // Match
-        // --------------------------------------------------
-
         public void StartMatch()
         {
-            bool started =
-                Economy.TryStartMatch(
-                    out string error);
+            if (!CanStartMatch)
+            {
+                Status = Coins < 1
+                    ? "Not enough coins."
+                    : "Cannot start a new match.";
+
+                NotifyChanged();
+                return;
+            }
+
+            string error;
+            bool started = Economy.TryStartMatch(out error);
 
             if (!started)
             {
-                Status =
-                    string.IsNullOrEmpty(error)
-                        ? "Cannot start match."
-                        : error;
+                Status = string.IsNullOrEmpty(error)
+                    ? "Cannot start match."
+                    : error;
 
                 NotifyChanged();
                 return;
@@ -135,8 +139,7 @@ namespace CardGame.Presentation.Game
                 SimpleCardGameRules.CreateDeck(),
                 SimpleCardGameRules.StartingHandSize);
 
-            Status =
-                "Match started. Choose a card.";
+            Status = "Match started. Choose a card.";
 
             NotifyChanged();
         }
@@ -287,6 +290,15 @@ namespace CardGame.Presentation.Game
             }
         }
 
+        public int Coins
+        {
+            get { return Economy.Coins; }
+        }
+
+        public bool CanStartMatch
+        {
+            get { return Coins >= 1 && !IsGameOver; }
+        }
         // --------------------------------------------------
         // Commands
         // --------------------------------------------------
@@ -366,8 +378,7 @@ namespace CardGame.Presentation.Game
                         return;
                     }
 
-                    Economy.GrantCoins(
-                        CoinsPerPurchase);
+                    Economy.GrantCoins(CoinsPerPurchase);
 
                     Status = "Coins purchased.";
                     NotifyChanged();
@@ -378,5 +389,6 @@ namespace CardGame.Presentation.Game
         {
             Changed?.Invoke();
         }
+
     }
 }
