@@ -29,8 +29,7 @@ namespace CardGame.Platform.Economy
         {
             if (!_wallet.TrySpend(MatchCost))
             {
-                error =
-                    "Not enough coins.";
+                error ="Not enough coins. Use the Mock IAP button to buy 10 coins.";
 
                 return false;
             }
