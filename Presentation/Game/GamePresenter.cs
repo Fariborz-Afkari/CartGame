@@ -13,23 +13,6 @@ namespace CardGame.Presentation.Game
 {
     public sealed class GamePresenter : IDisposable
     {
-        public sealed class CardViewData
-        {
-            public int InstanceId { get; }
-            public string Name { get; }
-            public int Value { get; }
-
-            public CardViewData(
-                int instanceId,
-                string name,
-                int value)
-            {
-                InstanceId = instanceId;
-                Name = name;
-                Value = value;
-            }
-        }
-
         public sealed class TargetViewData
         {
             public int PlayerId { get; }
@@ -69,7 +52,19 @@ namespace CardGame.Presentation.Game
 
         public IEconomyService Economy { get; }
         public IIapService Iap { get; }
-
+        public GameViewModel GetViewModel()
+        {
+            return new GameViewModel
+            {
+                Coins = Economy.Coins,
+                CanStartMatch = CanStartMatch,
+                IsPlayerTurn = IsPlayerTurn,
+                IsGameOver = IsGameOver,
+                CurrentPlayerName = CurrentPlayerName,
+                Status = Status,
+                Hand = GetPlayerHand()
+            };
+        }
         public string Status { get; private set; } = "Ready.";
 
         public event Action Changed;
@@ -184,8 +179,7 @@ namespace CardGame.Presentation.Game
             return result;
         }
 
-        public CardInteraction GetCardInteraction(
-            int cardId)
+        public CardInteraction GetCardInteraction(int cardId)
         {
             PlayerState player =
                 _engine.State.FindPlayer(
@@ -228,8 +222,7 @@ namespace CardGame.Presentation.Game
                 targets);
         }
 
-        private List<TargetViewData> GetDamageTargets(
-            PlayerState actor)
+        private List<TargetViewData> GetDamageTargets(PlayerState actor)
         {
             List<TargetViewData> targets =
                 new List<TargetViewData>();
@@ -320,9 +313,7 @@ namespace CardGame.Presentation.Game
             return result;
         }
 
-        public bool PlayCard(
-            int cardId,
-            int? targetPlayerId = null)
+        public bool PlayCard(int cardId, int? targetPlayerId = null)
         {
             bool result =
                 _engine.SubmitAction(
