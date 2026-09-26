@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using CardGame.Core.Cards;
 using CardGame.Core.Players;
 
 namespace CardGame.Core.Game
@@ -47,6 +48,11 @@ namespace CardGame.Core.Game
         public int? WinnerId { get; internal set; }
 
         /// <summary>
+        /// The deck belonging to this match.
+        /// </summary>
+        public Deck Deck { get; }
+
+        /// <summary>
         /// Players currently participating in the game.
         /// </summary>
         public IReadOnlyList<PlayerState> Players => _players;
@@ -69,6 +75,8 @@ namespace CardGame.Core.Game
 
             _players = new List<PlayerState>();
             _events = new List<GameEvent>();
+
+            Deck = new Deck();
 
             Phase = GamePhase.Setup;
             IsGameOver = false;
@@ -120,7 +128,19 @@ namespace CardGame.Core.Game
         /// </summary>
         internal void Reset()
         {
+            /*
+             * PlayerState instances are recreated by GameEngine
+             * when a new match starts, so their hands disappear
+             * together with the player collection.
+             */
             _players.Clear();
+
+            /*
+             * The deck belongs to the match and therefore must
+             * be explicitly cleared when the match is restarted.
+             */
+            Deck.Clear();
+
             _events.Clear();
 
             Phase = GamePhase.Setup;
