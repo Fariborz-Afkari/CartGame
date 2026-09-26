@@ -3,17 +3,32 @@ namespace CardGame.Platform.Economy
     public sealed class Wallet
     {
         public int Coins { get; private set; }
-        public Wallet(int initialCoins = 0) { Coins = initialCoins < 0 ? 0 : initialCoins; }
-        public void Initialize(int amount) => Coins = amount < 0 ? 0 : amount;
+
+        public void Initialize(int coins)
+        {
+            Coins = coins < 0
+                ? 0
+                : coins;
+        }
+
         public bool TrySpend(int amount)
         {
-            if (amount < 0 || Coins < amount) return false;
+            if (amount <= 0)
+                return false;
+
+            if (Coins < amount)
+                return false;
+
             Coins -= amount;
             return true;
         }
+
         public void AddCoins(int amount)
         {
-            if (amount > 0) Coins += amount;
+            if (amount <= 0)
+                return;
+
+            Coins += amount;
         }
     }
 }
