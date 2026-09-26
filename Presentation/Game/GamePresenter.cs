@@ -6,74 +6,293 @@ using CardGame.Games.SimpleCardGame;
 using CardGame.Platform.Economy;
 using CardGame.Platform.Iap;
 using CardGame.Platform.Storage;
+using System;
 using System.Collections.Generic;
 
 namespace CardGame.Presentation.Game
 {
-    public sealed class GamePresenter
+    public sealed class GamePresenter : IDisposable
     {
-        public GameEngine Engine { get; }
+        public sealed class CardViewData
+        {
+            public int InstanceId { get; }
+            public string Name { get; }
+            public int Value { get; }
+
+            public CardViewData(
+                int instanceId,
+                string name,
+                int value)
+            {
+                InstanceId = instanceId;
+                Name = name;
+                Value = value;
+            }
+        }
+
+        public sealed class TargetViewData
+        {
+            public int PlayerId { get; }
+            public string PlayerName { get; }
+
+            public TargetViewData(
+                int playerId,
+                string playerName)
+            {
+                PlayerId = playerId;
+                PlayerName = playerName;
+            }
+        }
+
+        public sealed class CardInteraction
+        {
+            public int CardId { get; }
+            public bool RequiresTarget { get; }
+            public IReadOnlyList<TargetViewData> Targets { get; }
+
+            public CardInteraction(
+                int cardId,
+                bool requiresTarget,
+                IReadOnlyList<TargetViewData> targets)
+            {
+                CardId = cardId;
+                RequiresTarget = requiresTarget;
+                Targets = targets;
+            }
+        }
+
+        private const int HumanPlayerId = 0;
+
+        private readonly GameEngine _engine;
+        private readonly GameFlowController _flowController;
+
         public IEconomyService Economy { get; }
         public IIapService Iap { get; }
 
         public string Status { get; private set; } = "Ready.";
 
-        private readonly GameFlowController _flowController;
+        public event Action Changed;
 
         public GamePresenter()
         {
-            Engine = new GameEngine(
-                "SimpleCardGame",
-                startingPlayerId: 0);
+            _engine =
+                new GameEngine(
+                    "SimpleCardGame",
+                    startingPlayerId: HumanPlayerId);
 
-            Economy = new EconomyService(
-                new LocalPlayerData());
+            Economy =
+                new EconomyService(
+                    new LocalPlayerData());
 
-            Iap = new MockIapService();
+            Iap =
+                new MockIapService();
 
             _flowController =
                 new GameFlowController(
-                    Engine,
+                    _engine,
                     new BasicAiStrategy());
+
+            _engine.EventProduced += OnEngineEvent;
         }
+
+        public void Dispose()
+        {
+            _engine.EventProduced -= OnEngineEvent;
+        }
+
+        private void OnEngineEvent(GameEvent gameEvent)
+        {
+            Changed?.Invoke();
+        }
+
+        // --------------------------------------------------
+        // Match
+        // --------------------------------------------------
 
         public void StartMatch()
         {
-            string error;
+            bool started =
+                Economy.TryStartMatch();
 
-            if (!Economy.TryStartMatch(out error))
+            if (!started)
             {
-                Status = error;
+                Status = "Cannot start match.";
+                NotifyChanged();
                 return;
             }
 
-            Engine.StartMatch(
+            _engine.StartMatch(
                 SimpleCardGameRules.CreateDeck(),
                 SimpleCardGameRules.StartingHandSize);
 
             Status = "Match started. Choose a card.";
+
+            NotifyChanged();
         }
 
-        public IReadOnlyList<Card> GetPlayerHand()
+        // --------------------------------------------------
+        // Presentation state
+        // --------------------------------------------------
+
+        public IReadOnlyList<CardViewData> GetPlayerHand()
         {
             PlayerState player =
-                Engine.State.FindPlayer(0);
+                _engine.State.FindPlayer(
+                    HumanPlayerId);
 
             if (player == null)
-                return new List<Card>();
+                return Array.Empty<CardViewData>();
 
-            return player.Hand.Cards;
+            List<CardViewData> result =
+                new List<CardViewData>(
+                    player.Hand.Count);
+
+            for (int i = 0;
+                 i < player.Hand.Count;
+                 i++)
+            {
+                Card card =
+                    player.Hand.Cards[i];
+
+                if (card == null ||
+                    card.Definition == null)
+                {
+                    continue;
+                }
+
+                result.Add(
+                    new CardViewData(
+                        card.InstanceId,
+                        card.Definition.Name,
+                        card.Definition.Value));
+            }
+
+            return result;
         }
+
+        public CardInteraction GetCardInteraction(
+            int cardId)
+        {
+            PlayerState player =
+                _engine.State.FindPlayer(
+                    HumanPlayerId);
+
+            if (player == null)
+            {
+                return new CardInteraction(
+                    cardId,
+                    false,
+                    Array.Empty<TargetViewData>());
+            }
+
+            Card card =
+                player.Hand.Find(cardId);
+
+            if (card == null ||
+                card.Definition == null)
+            {
+                return new CardInteraction(
+                    cardId,
+                    false,
+                    Array.Empty<TargetViewData>());
+            }
+
+            if (card.Definition.Effect != CardEffect.Damage)
+            {
+                return new CardInteraction(
+                    cardId,
+                    false,
+                    Array.Empty<TargetViewData>());
+            }
+
+            List<TargetViewData> targets =
+                GetDamageTargets(player);
+
+            return new CardInteraction(
+                cardId,
+                targets.Count > 0,
+                targets);
+        }
+
+        private List<TargetViewData> GetDamageTargets(
+            PlayerState actor)
+        {
+            List<TargetViewData> targets =
+                new List<TargetViewData>();
+
+            for (int i = 0;
+                 i < _engine.State.Players.Count;
+                 i++)
+            {
+                PlayerState player =
+                    _engine.State.Players[i];
+
+                if (player == null)
+                    continue;
+
+                if (player.Id == actor.Id)
+                    continue;
+
+                if (player.Health <= 0)
+                    continue;
+
+                targets.Add(
+                    new TargetViewData(
+                        player.Id,
+                        player.Name));
+            }
+
+            return targets;
+        }
+
+        public bool IsPlayerTurn
+        {
+            get
+            {
+                return _engine.State.CurrentPlayerId ==
+                       HumanPlayerId;
+            }
+        }
+
+        public bool IsGameOver
+        {
+            get
+            {
+                return _engine.State.IsGameOver;
+            }
+        }
+
+        public string CurrentPlayerName
+        {
+            get
+            {
+                PlayerState player =
+                    _engine.State.FindPlayer(
+                        _engine.State.CurrentPlayerId);
+
+                return player != null
+                    ? player.Name
+                    : string.Empty;
+            }
+        }
+
+        // --------------------------------------------------
+        // Commands
+        // --------------------------------------------------
 
         public bool DrawCard()
         {
             bool result =
-                Engine.SubmitAction(
-                    GameAction.DrawCard(0));
+                _engine.SubmitAction(
+                    GameAction.DrawCard(
+                        HumanPlayerId));
 
-            Status = result
-                ? "Card drawn."
-                : "Cannot draw a card.";
+            Status =
+                result
+                    ? "Card drawn."
+                    : "Cannot draw a card.";
+
+            NotifyChanged();
 
             return result;
         }
@@ -83,15 +302,18 @@ namespace CardGame.Presentation.Game
             int? targetPlayerId = null)
         {
             bool result =
-                Engine.SubmitAction(
+                _engine.SubmitAction(
                     GameAction.PlayCard(
-                        0,
+                        HumanPlayerId,
                         cardId,
                         targetPlayerId));
 
-            Status = result
-                ? "Card played."
-                : "Cannot play this card.";
+            Status =
+                result
+                    ? "Card played."
+                    : "Cannot play this card.";
+
+            NotifyChanged();
 
             return result;
         }
@@ -99,42 +321,49 @@ namespace CardGame.Presentation.Game
         public void EndTurn()
         {
             bool result =
-                Engine.SubmitAction(
-                    GameAction.EndTurn(0));
+                _engine.SubmitAction(
+                    GameAction.EndTurn(
+                        HumanPlayerId));
 
             if (!result)
             {
                 Status = "Cannot end turn.";
+                NotifyChanged();
                 return;
             }
 
             _flowController.RunAiTurns();
 
-            Status = Engine.State.IsGameOver
-                ? "Match ended."
-                : "Turn ended.";
+            Status =
+                _engine.State.IsGameOver
+                    ? "Match ended."
+                    : "Turn ended.";
+
+            NotifyChanged();
         }
 
         public void BuyCoins()
         {
-            Iap.PurchaseCoins(result =>
-            {
-                if (result.Success)
+            Iap.PurchaseCoins(
+                100,
+                success =>
                 {
-                    Economy.GrantCoins(
-                        result.CoinsGranted);
+                    if (!success)
+                    {
+                        Status = "Purchase failed.";
+                        NotifyChanged();
+                        return;
+                    }
 
-                    Status =
-                        result.Message +
-                        " +" +
-                        result.CoinsGranted +
-                        " coins.";
-                }
-                else
-                {
-                    Status = result.Message;
-                }
-            });
+                    Economy.GrantCoins(100);
+                    Status = "Coins purchased.";
+                    NotifyChanged();
+                });
+        }
+
+        private void NotifyChanged()
+        {
+            Changed?.Invoke();
         }
     }
 }
