@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+using CardGame.Core.AI;
 using CardGame.Core.Cards;
 using CardGame.Core.Game;
 using CardGame.Core.Players;
@@ -6,6 +6,7 @@ using CardGame.Games.SimpleCardGame;
 using CardGame.Platform.Economy;
 using CardGame.Platform.Iap;
 using CardGame.Platform.Storage;
+using System.Collections.Generic;
 
 namespace CardGame.Presentation.Game
 {
@@ -16,7 +17,7 @@ namespace CardGame.Presentation.Game
         public IIapService Iap { get; }
 
         public string Status { get; private set; } = "Ready.";
-
+        private AiTurnRunner _aiTurnRunner;
         public GamePresenter()
         {
             Engine = new GameEngine(
@@ -27,6 +28,11 @@ namespace CardGame.Presentation.Game
                 new LocalPlayerData());
 
             Iap = new MockIapService();
+
+            _aiTurnRunner =
+                new AiTurnRunner(
+                    Engine,
+                    new BasicAiStrategy());
         }
 
         public void StartMatch()
@@ -88,12 +94,21 @@ namespace CardGame.Presentation.Game
 
         public void EndTurn()
         {
-            bool result = Engine.SubmitAction(
-                GameAction.EndTurn(0));
+            bool result =
+                Engine.SubmitAction(
+                    GameAction.EndTurn(0));
 
-            Status = result
-                ? "Turn ended."
-                : "Cannot end turn.";
+            if (!result)
+            {
+                Status = "Cannot end turn.";
+                return;
+            }
+
+            RunAiTurns();
+
+            Status = Engine.State.IsGameOver
+                ? "Match ended."
+                : "Turn ended.";
         }
 
         public void BuyCoins()
@@ -116,6 +131,24 @@ namespace CardGame.Presentation.Game
                     Status = result.Message;
                 }
             });
+        }
+        private void RunAiTurns()
+        {
+            while (!Engine.State.IsGameOver)
+            {
+                PlayerState current =
+                    Engine.State.FindPlayer(
+                        Engine.State.CurrentPlayerId);
+
+                if (current == null ||
+                    current.IsHuman)
+                {
+                    break;
+                }
+
+                if (!_aiTurnRunner.RunCurrentTurn())
+                    break;
+            }
         }
     }
 }
