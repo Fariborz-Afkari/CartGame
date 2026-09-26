@@ -1,6 +1,7 @@
 using System;
-using CardGame.Core.Players;
+using System.Collections.Generic;
 using CardGame.Core.Cards;
+using CardGame.Core.Players;
 
 namespace CardGame.Core.Game
 {
@@ -14,7 +15,8 @@ namespace CardGame.Core.Game
     /// - records and publishes GameEvent instances
     /// - controls turn progression and match lifecycle
     ///
-    /// GameEngine does not contain card-specific rules.
+    /// GameEngine does not know the composition of a specific game's deck.
+    /// The concrete game supplies the cards when a match starts.
     /// </summary>
     public sealed class GameEngine
     {
@@ -22,9 +24,6 @@ namespace CardGame.Core.Game
 
         public GameState State { get; }
 
-        /// <summary>
-        /// Raised whenever a new game event is produced.
-        /// </summary>
         public event Action<GameEvent> EventProduced;
 
         public GameEngine(
@@ -44,13 +43,29 @@ namespace CardGame.Core.Game
         }
 
         /// <summary>
-        /// Starts a new match using the default sample players.
+        /// Starts a match without a predefined deck.
         ///
-        /// Player creation is currently kept here because the project
-        /// does not yet have a separate match/player setup layer.
+        /// This overload is kept for Core consumers that want to
+        /// configure the deck separately.
         /// </summary>
         public void StartMatch()
         {
+            StartMatch(null, 0);
+        }
+
+        /// <summary>
+        /// Starts a match using the supplied concrete card instances.
+        /// The deck is shuffled and each player receives the requested
+        /// number of opening cards.
+        /// </summary>
+        public void StartMatch(
+            IEnumerable<Card> initialDeck,
+            int initialHandSize)
+        {
+            if (initialHandSize < 0)
+                throw new ArgumentOutOfRangeException(
+                    nameof(initialHandSize));
+
             State.Reset();
 
             AddDefaultPlayers();
@@ -59,6 +74,23 @@ namespace CardGame.Core.Game
             {
                 throw new InvalidOperationException(
                     $"Starting player {_startingPlayerId} does not exist.");
+            }
+
+            if (initialDeck != null)
+            {
+                State.Deck.AddRange(initialDeck);
+                State.Deck.Shuffle();
+            }
+
+            DealOpeningHands(initialHandSize);
+
+            if (initialHandSize > 0 &&
+                State.Deck.Count == 0 &&
+                !AllPlayersHaveCards())
+            {
+                throw new InvalidOperationException(
+                    "The supplied deck does not contain enough cards " +
+                    "for the requested opening hands.");
             }
 
             State.Phase = GamePhase.TurnStart;
@@ -72,12 +104,6 @@ namespace CardGame.Core.Game
             StartTurn(_startingPlayerId);
         }
 
-        /// <summary>
-        /// Submits an action requested by a player or AI.
-        ///
-        /// Returns true when the action was accepted and processed.
-        /// Returns false when the action was rejected.
-        /// </summary>
         public bool SubmitAction(GameAction action)
         {
             if (action == null)
@@ -121,37 +147,39 @@ namespace CardGame.Core.Game
             }
         }
 
-        /// <summary>
-        /// Handles a draw-card request.
-        ///
-        /// The current Core model does not yet contain a Deck/Hand system,
-        /// therefore no card can be drawn yet.
-        /// </summary>
-        private bool ResolveDrawCard(GameAction action) { 
-            PlayerState actor = State.FindPlayer(action.PlayerId); 
-            if (actor == null) { 
-                Reject(action.PlayerId, "The player does not exist."); 
-                return false; 
-            } 
-            int handCountBefore = actor.Hand.Count; 
-            if (!GameRules.Resolve(State, action)) {
-                Reject(action.PlayerId, "The card cannot be drawn."); 
-                return false; 
-            } /* * GameRules has already moved the real card: * 
-               * * State.Deck -> actor.Hand * 
-               * * The hand contains the newly drawn card at the end. */ 
-            if (actor.Hand.Count <= handCountBefore) { 
-                Reject(action.PlayerId, "The card draw did not produce a card."); 
-                return false; 
-            } 
-            Card drawnCard = actor.Hand.Cards[actor.Hand.Count - 1]; 
-            Emit(GameEvent.CardDrawn(action.PlayerId, drawnCard.InstanceId)); 
-            return true; 
+        private bool ResolveDrawCard(GameAction action)
+        {
+            PlayerState actor =
+                State.FindPlayer(action.PlayerId);
+
+            if (actor == null)
+            {
+                Reject(
+                    action.PlayerId,
+                    "The player does not exist.");
+
+                return false;
+            }
+
+            if (!GameRules.Resolve(State, action))
+            {
+                Reject(
+                    action.PlayerId,
+                    "The card cannot be drawn.");
+
+                return false;
+            }
+
+            Card drawnCard =
+                actor.Hand.Cards[actor.Hand.Count - 1];
+
+            Emit(GameEvent.CardDrawn(
+                action.PlayerId,
+                drawnCard.InstanceId));
+
+            return true;
         }
 
-        /// <summary>
-        /// Handles a play-card request.
-        /// </summary>
         private bool ResolvePlayCard(GameAction action)
         {
             if (!action.CardId.HasValue)
@@ -182,10 +210,38 @@ namespace CardGame.Core.Game
             return true;
         }
 
-        /// <summary>
-        /// Ends the current player's turn and advances to the next
-        /// living player.
-        /// </summary>
+        private void DealOpeningHands(int handSize)
+        {
+            if (handSize <= 0)
+                return;
+
+            for (int round = 0; round < handSize; round++)
+            {
+                for (int i = 0; i < State.Players.Count; i++)
+                {
+                    Card card = State.Deck.Draw();
+
+                    if (card == null)
+                        throw new InvalidOperationException(
+                            "The supplied deck does not contain enough " +
+                            "cards for the opening hands.");
+
+                    State.Players[i].Hand.Add(card);
+                }
+            }
+        }
+
+        private bool AllPlayersHaveCards()
+        {
+            for (int i = 0; i < State.Players.Count; i++)
+            {
+                if (State.Players[i].Hand.Count == 0)
+                    return false;
+            }
+
+            return true;
+        }
+
         private bool EndTurn(int playerId)
         {
             Emit(GameEvent.TurnEnded(playerId));
@@ -210,9 +266,6 @@ namespace CardGame.Core.Game
             return true;
         }
 
-        /// <summary>
-        /// Starts a player's turn.
-        /// </summary>
         private void StartTurn(int playerId)
         {
             PlayerState player =
@@ -229,9 +282,6 @@ namespace CardGame.Core.Game
             Emit(GameEvent.TurnStarted(playerId));
         }
 
-        /// <summary>
-        /// Determines whether the specified player is allowed to act.
-        /// </summary>
         private bool IsPlayerTurn(int playerId)
         {
             if (State.IsGameOver)
@@ -250,9 +300,6 @@ namespace CardGame.Core.Game
                    player.Health > 0;
         }
 
-        /// <summary>
-        /// Finds the next living player in circular order.
-        /// </summary>
         private int FindNextLivingPlayer(int currentPlayerId)
         {
             if (State.Players.Count == 0)
@@ -290,9 +337,6 @@ namespace CardGame.Core.Game
             return -1;
         }
 
-        /// <summary>
-        /// Checks whether the match has reached a terminal state.
-        /// </summary>
         private bool CheckGameOver()
         {
             if (State.IsGameOver)
@@ -301,11 +345,6 @@ namespace CardGame.Core.Game
             PlayerState human =
                 State.FindPlayer(0);
 
-            /*
-             * The current sample game has player 0 as the human player.
-             * This will later be replaced by a more generic win-condition
-             * system when game-specific rules are introduced.
-             */
             if (human == null || human.Health <= 0)
             {
                 EndMatch(null);
@@ -336,9 +375,6 @@ namespace CardGame.Core.Game
             return false;
         }
 
-        /// <summary>
-        /// Ends the match and publishes the final event.
-        /// </summary>
         private void EndMatch(int? winnerId)
         {
             if (State.IsGameOver)
@@ -351,12 +387,6 @@ namespace CardGame.Core.Game
             Emit(GameEvent.MatchEnded(winnerId));
         }
 
-        /// <summary>
-        /// Adds the current sample game's players.
-        ///
-        /// This is temporary infrastructure. Later this should be moved
-        /// to a match configuration / player factory.
-        /// </summary>
         private void AddDefaultPlayers()
         {
             State.AddPlayer(
@@ -384,9 +414,6 @@ namespace CardGame.Core.Game
                     false));
         }
 
-        /// <summary>
-        /// Records an event in GameState and notifies listeners.
-        /// </summary>
         private void Emit(GameEvent gameEvent)
         {
             State.AddEvent(gameEvent);
@@ -394,9 +421,6 @@ namespace CardGame.Core.Game
             EventProduced?.Invoke(gameEvent);
         }
 
-        /// <summary>
-        /// Creates and publishes an ActionRejected event.
-        /// </summary>
         private void Reject(
             int playerId,
             string message)
