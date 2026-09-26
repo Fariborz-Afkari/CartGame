@@ -92,7 +92,15 @@ namespace CardGame.Core.Game
 
         private bool ResolveGameplayAction(GameAction action)
         {
-            GameRules.Resolve(State, action);
+            bool resolved = GameRules.Resolve(State, action);
+
+            if (!resolved)
+            {
+                Emit(GameEvent.ActionRejected(
+                    action.PlayerId,
+                    "The action is not valid."));
+                return false;
+            }
 
             // GameRules is responsible for changing the state.
             // GameEngine is responsible for emitting domain events
