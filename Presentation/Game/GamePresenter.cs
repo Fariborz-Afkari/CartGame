@@ -1,5 +1,6 @@
 using UnityEngine;
 using CardGame.Core.Game;
+using CardGame.Games.SimpleCardGame;
 using CardGame.Platform.Economy;
 using CardGame.Platform.Iap;
 using CardGame.Platform.Storage;
@@ -28,13 +29,18 @@ namespace CardGame.Presentation.Game
                 Status = error;
                 return;
             }
-            Engine.StartMatch();
+
+            Engine.StartMatch(
+                SimpleCardGameRules.CreateDeck(),
+                SimpleCardGameRules.StartingHandSize);
+
             Status = "Match started. Choose a card.";
         }
 
         public void PlayerAction(GameActionType action)
         {
-            if (Engine.TryPlayerAction(action)) Status = "Action resolved.";
+            if (Engine.TryPlayerAction(action))
+                Status = "Action resolved.";
         }
 
         public void BuyCoins()
@@ -44,9 +50,14 @@ namespace CardGame.Presentation.Game
                 if (result.Success)
                 {
                     Economy.GrantCoins(result.CoinsGranted);
-                    Status = result.Message + " +" + result.CoinsGranted + " coins.";
+                    Status = result.Message + " +" +
+                             result.CoinsGranted +
+                             " coins.";
                 }
-                else Status = result.Message;
+                else
+                {
+                    Status = result.Message;
+                }
             });
         }
     }
