@@ -1,4 +1,7 @@
+using CardGame.Core.Cards;
+using CardGame.Core.Game;
 using CardGame.Core.Players;
+using static UnityEngine.GraphicsBuffer;
 
 namespace CardGame.Core.Game
 {
@@ -7,27 +10,9 @@ namespace CardGame.Core.Game
     ///
     /// GameRules does not control game flow and does not emit events.
     /// It validates and resolves GameAction instances against GameState.
-    ///
-    /// GameEngine is responsible for:
-    /// - receiving actions
-    /// - enforcing turn flow
-    /// - emitting GameEvents
-    /// - deciding when a match starts/ends
-    ///
-    /// GameRules is responsible for:
-    /// - validating action-specific rules
-    /// - mutating the game state when an action is valid
     /// </summary>
     public static class GameRules
     {
-        /// <summary>
-        /// Resolves an action against the supplied state.
-        ///
-        /// Returns true when the action was valid and applied.
-        /// Returns false when the action was rejected by the rules.
-        ///
-        /// GameRules itself does not create GameEvents.
-        /// </summary>
         public static bool Resolve(
             GameState state,
             GameAction action)
@@ -62,11 +47,6 @@ namespace CardGame.Core.Game
             }
         }
 
-        /// <summary>
-        /// Checks whether an action can be performed without changing state.
-        ///
-        /// This is useful for UI, AI and input validation.
-        /// </summary>
         public static bool CanResolve(
             GameState state,
             GameAction action)
@@ -88,7 +68,7 @@ namespace CardGame.Core.Game
             switch (action.Type)
             {
                 case GameActionType.DrawCard:
-                    return CanDrawCard(state, actor, action);
+                    return CanDrawCard(state, actor);
 
                 case GameActionType.PlayCard:
                     return CanPlayCard(state, actor, action);
@@ -106,16 +86,17 @@ namespace CardGame.Core.Game
             PlayerState actor,
             GameAction action)
         {
-            /*
-             * The current project does not yet have a card/deck model
-             * attached to GameState or PlayerState.
-             *
-             * Therefore DrawCard cannot mutate a real card collection yet.
-             *
-             * This method intentionally returns false until the card
-             * model is introduced.
-             */
-            return false;
+            if (!CanDrawCard(state, actor))
+                return false;
+
+            Card card = state.Deck.Draw();
+
+            if (card == null)
+                return false;
+
+            actor.Hand.Add(card);
+
+            return true;
         }
 
         private static bool ResolvePlayCard(
@@ -123,34 +104,123 @@ namespace CardGame.Core.Game
             PlayerState actor,
             GameAction action)
         {
+            if (!CanPlayCard(state, actor, action))
+                return false;
+
+            Card card = actor.Hand.Find(action.CardId.Value);
+
+            if (card == null || card.Definition == null)
+                return false;
+
+            bool resolved = ResolveCardEffect(
+                state,
+                actor,
+                card,
+                action);
+
+            if (!resolved)
+                return false;
+
             /*
-             * The current project does not yet have:
-             *
-             * - PlayerState.Hand
-             * - DeckState
-             * - CardState/CardDefinition integration
-             *
-             * Therefore PlayCard cannot safely be resolved yet.
-             *
-             * Do not mutate health or other state here based only on
-             * CardId. Card effects belong to the card/rules layer.
+             * The card is consumed only after its effect
+             * has been successfully resolved.
              */
-            return false;
+            return actor.Hand.Remove(card.InstanceId);
+        }
+
+        private static bool ResolveCardEffect(
+            GameState state,
+            PlayerState actor,
+            Card card,
+            GameAction action)
+        {
+            CardDefinition definition = card.Definition;
+
+            switch (definition.Effect)
+            {
+                case CardEffect.Damage:
+                    return ResolveDamage(
+                        state,
+                        actor,
+                        definition.Value,
+                        action.TargetPlayerId);
+
+                case CardEffect.Heal:
+                    return ResolveHeal(
+                        actor,
+                        definition.Value);
+
+                case CardEffect.Guard:
+                    return ResolveGuard(actor);
+
+                default:
+                    return false;
+            }
+        }
+
+        private static bool ResolveDamage(
+            GameState state,
+            PlayerState actor,
+            int amount,
+            int? targetPlayerId)
+        {
+            if (amount <= 0)
+                return false;
+
+            PlayerState target;
+
+            if (targetPlayerId.HasValue)
+            {
+                target = Find(
+                    state,
+                    targetPlayerId.Value);
+
+                if (!IsValidOpponent(actor, target))
+                    return false;
+            }
+            else
+            {
+                target = FindNextLivingOpponent(
+                    state,
+                    actor.Id);
+
+                if (target == null)
+                    return false;
+            }
+
+            target.Damage(amount);
+
+            return true;
+        }
+
+        private static bool ResolveHeal(
+            PlayerState actor,
+            int amount)
+        {
+            if (amount <= 0)
+                return false;
+
+            actor.Heal(amount);
+
+            return true;
+        }
+
+        private static bool ResolveGuard(
+            PlayerState actor)
+        {
+            actor.Guarding = true;
+
+            return true;
         }
 
         private static bool CanDrawCard(
             GameState state,
-            PlayerState actor,
-            GameAction action)
+            PlayerState actor)
         {
-            if (actor == null)
+            if (state == null || actor == null)
                 return false;
 
-            /*
-             * Card/deck state is not available yet.
-             * Keep this false until the card model is connected.
-             */
-            return false;
+            return !state.Deck.IsEmpty;
         }
 
         private static bool CanPlayCard(
@@ -158,17 +228,73 @@ namespace CardGame.Core.Game
             PlayerState actor,
             GameAction action)
         {
-            if (actor == null)
+            if (state == null || actor == null || action == null)
                 return false;
 
             if (!action.CardId.HasValue)
                 return false;
 
-            /*
-             * Card ownership / hand validation will be added when
-             * PlayerState receives a hand/card collection.
-             */
-            return false;
+            Card card = actor.Hand.Find(
+                action.CardId.Value);
+
+            if (card == null || card.Definition == null)
+                return false;
+
+            CardDefinition definition = card.Definition;
+
+            switch (definition.Effect)
+            {
+                case CardEffect.Damage:
+                    if (definition.Value <= 0)
+                        return false;
+
+                    /*
+                     * A missing target means:
+                     * "attack the next living opponent".
+                     */
+                    if (!action.TargetPlayerId.HasValue)
+                        return FindNextLivingOpponent(
+                            state,
+                            actor.Id) != null;
+
+                    PlayerState damageTarget =
+                        Find(
+                            state,
+                            action.TargetPlayerId.Value);
+
+                    return IsValidOpponent(
+                        actor,
+                        damageTarget);
+
+                case CardEffect.Heal:
+                    /*
+                     * Heal is self-targeted in the current
+                     * simple card game.
+                     */
+                    return definition.Value > 0;
+
+                case CardEffect.Guard:
+                    /*
+                     * Guard is self-targeted.
+                     */
+                    return true;
+
+                default:
+                    return false;
+            }
+        }
+
+        private static bool IsValidOpponent(
+            PlayerState actor,
+            PlayerState target)
+        {
+            if (actor == null || target == null)
+                return false;
+
+            if (target.Id == actor.Id)
+                return false;
+
+            return target.Health > 0;
         }
 
         private static bool CanEndTurn(
@@ -182,9 +308,6 @@ namespace CardGame.Core.Game
                    state.CurrentPlayerId == actor.Id;
         }
 
-        /// <summary>
-        /// Finds a player by id.
-        /// </summary>
         public static PlayerState Find(
             GameState state,
             int playerId)
@@ -195,12 +318,6 @@ namespace CardGame.Core.Game
             return state.FindPlayer(playerId);
         }
 
-        /// <summary>
-        /// Finds the next living opponent.
-        ///
-        /// The search starts after the supplied actor and wraps around
-        /// the player list.
-        /// </summary>
         public static PlayerState FindNextLivingOpponent(
             GameState state,
             int actorId)
@@ -227,20 +344,21 @@ namespace CardGame.Core.Game
                  offset++)
             {
                 int index =
-                    (actorIndex + offset) % state.Players.Count;
+                    (actorIndex + offset) %
+                    state.Players.Count;
 
                 PlayerState player = state.Players[index];
 
-                if (player.Id != actorId && player.Health > 0)
+                if (player.Id != actorId &&
+                    player.Health > 0)
+                {
                     return player;
+                }
             }
 
             return null;
         }
 
-        /// <summary>
-        /// Counts all living players.
-        /// </summary>
         public static int CountLiving(GameState state)
         {
             if (state == null)
@@ -257,22 +375,17 @@ namespace CardGame.Core.Game
             return count;
         }
 
-        /// <summary>
-        /// Determines whether a player is still alive.
-        /// </summary>
         public static bool IsAlive(
             GameState state,
             int playerId)
         {
-            PlayerState player = Find(state, playerId);
+            PlayerState player =
+                Find(state, playerId);
 
-            return player != null && player.Health > 0;
+            return player != null &&
+                   player.Health > 0;
         }
 
-        /// <summary>
-        /// Determines whether the supplied player is the only
-        /// living player remaining.
-        /// </summary>
         public static bool IsLastLivingPlayer(
             GameState state,
             int playerId)
@@ -280,10 +393,7 @@ namespace CardGame.Core.Game
             if (!IsAlive(state, playerId))
                 return false;
 
-            if (CountLiving(state) != 1)
-                return false;
-
-            return true;
+            return CountLiving(state) == 1;
         }
     }
 }
