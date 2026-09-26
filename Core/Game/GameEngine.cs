@@ -1,5 +1,6 @@
 using System;
 using CardGame.Core.Players;
+using CardGame.Core.Cards;
 
 namespace CardGame.Core.Game
 {
@@ -126,26 +127,26 @@ namespace CardGame.Core.Game
         /// The current Core model does not yet contain a Deck/Hand system,
         /// therefore no card can be drawn yet.
         /// </summary>
-        private bool ResolveDrawCard(GameAction action)
-        {
-            if (!GameRules.Resolve(State, action))
-            {
-                Reject(
-                    action.PlayerId,
-                    "The card cannot be drawn.");
-
-                return false;
-            }
-
-            /*
-             * A CardDrawn event will be emitted here once the Core model
-             * has a real Deck/Hand implementation and the resolved card
-             * id can be obtained from the resulting state.
-             *
-             * We intentionally do not fabricate a card id here.
-             */
-
-            return true;
+        private bool ResolveDrawCard(GameAction action) { 
+            PlayerState actor = State.FindPlayer(action.PlayerId); 
+            if (actor == null) { 
+                Reject(action.PlayerId, "The player does not exist."); 
+                return false; 
+            } 
+            int handCountBefore = actor.Hand.Count; 
+            if (!GameRules.Resolve(State, action)) {
+                Reject(action.PlayerId, "The card cannot be drawn."); 
+                return false; 
+            } /* * GameRules has already moved the real card: * 
+               * * State.Deck -> actor.Hand * 
+               * * The hand contains the newly drawn card at the end. */ 
+            if (actor.Hand.Count <= handCountBefore) { 
+                Reject(action.PlayerId, "The card draw did not produce a card."); 
+                return false; 
+            } 
+            Card drawnCard = actor.Hand.Cards[actor.Hand.Count - 1]; 
+            Emit(GameEvent.CardDrawn(action.PlayerId, drawnCard.InstanceId)); 
+            return true; 
         }
 
         /// <summary>
