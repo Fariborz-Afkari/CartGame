@@ -17,7 +17,9 @@ namespace CardGame.Presentation.Game
         public IIapService Iap { get; }
 
         public string Status { get; private set; } = "Ready.";
-        private AiTurnRunner _aiTurnRunner;
+
+        private readonly GameFlowController _flowController;
+
         public GamePresenter()
         {
             Engine = new GameEngine(
@@ -29,8 +31,8 @@ namespace CardGame.Presentation.Game
 
             Iap = new MockIapService();
 
-            _aiTurnRunner =
-                new AiTurnRunner(
+            _flowController =
+                new GameFlowController(
                     Engine,
                     new BasicAiStrategy());
         }
@@ -65,8 +67,9 @@ namespace CardGame.Presentation.Game
 
         public bool DrawCard()
         {
-            bool result = Engine.SubmitAction(
-                GameAction.DrawCard(0));
+            bool result =
+                Engine.SubmitAction(
+                    GameAction.DrawCard(0));
 
             Status = result
                 ? "Card drawn."
@@ -79,11 +82,12 @@ namespace CardGame.Presentation.Game
             int cardId,
             int? targetPlayerId = null)
         {
-            bool result = Engine.SubmitAction(
-                GameAction.PlayCard(
-                    0,
-                    cardId,
-                    targetPlayerId));
+            bool result =
+                Engine.SubmitAction(
+                    GameAction.PlayCard(
+                        0,
+                        cardId,
+                        targetPlayerId));
 
             Status = result
                 ? "Card played."
@@ -104,7 +108,7 @@ namespace CardGame.Presentation.Game
                 return;
             }
 
-            RunAiTurns();
+            _flowController.RunAiTurns();
 
             Status = Engine.State.IsGameOver
                 ? "Match ended."
@@ -131,24 +135,6 @@ namespace CardGame.Presentation.Game
                     Status = result.Message;
                 }
             });
-        }
-        private void RunAiTurns()
-        {
-            while (!Engine.State.IsGameOver)
-            {
-                PlayerState current =
-                    Engine.State.FindPlayer(
-                        Engine.State.CurrentPlayerId);
-
-                if (current == null ||
-                    current.IsHuman)
-                {
-                    break;
-                }
-
-                if (!_aiTurnRunner.RunCurrentTurn())
-                    break;
-            }
         }
     }
 }
