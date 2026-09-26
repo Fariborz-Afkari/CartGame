@@ -5,36 +5,54 @@ namespace CardGame.Platform.Economy
     public sealed class EconomyService : IEconomyService
     {
         private const int MatchCost = 1;
-        private readonly Wallet wallet;
-        private readonly LocalPlayerData storage;
 
-        public int Coins => wallet.Coins;
+        private readonly Wallet _wallet;
+        private readonly LocalPlayerData _storage;
 
-        public EconomyService(LocalPlayerData storage)
+        public int Coins
         {
-            this.storage = storage;
-            wallet = new Wallet();
-            wallet.Initialize(storage.LoadCoins());
+            get { return _wallet.Coins; }
         }
 
-        public bool TryStartMatch(out string error)
+        public EconomyService(
+            LocalPlayerData storage)
         {
-            if (!wallet.TrySpend(MatchCost))
+            _storage = storage;
+            _wallet = new Wallet();
+
+            _wallet.Initialize(
+                _storage.LoadCoins());
+        }
+
+        public bool TryStartMatch(
+            out string error)
+        {
+            if (!_wallet.TrySpend(MatchCost))
             {
-                error = "Not enough coins. Use the Mock IAP button to buy 10 coins.";
+                error =
+                    "Not enough coins.";
+
                 return false;
             }
+
             Save();
+
             error = string.Empty;
+
             return true;
         }
 
-        public void GrantCoins(int amount)
+        public void GrantCoins(
+            int amount)
         {
-            wallet.AddCoins(amount);
+            _wallet.AddCoins(amount);
             Save();
         }
 
-        public void Save() => storage.SaveCoins(wallet.Coins);
+        public void Save()
+        {
+            _storage.SaveCoins(
+                _wallet.Coins);
+        }
     }
 }
