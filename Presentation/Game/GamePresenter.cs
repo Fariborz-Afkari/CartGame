@@ -1,4 +1,3 @@
-using UnityEngine;
 using CardGame.Core.Game;
 using CardGame.Games.SimpleCardGame;
 using CardGame.Platform.Economy;
@@ -12,18 +11,25 @@ namespace CardGame.Presentation.Game
         public GameEngine Engine { get; }
         public IEconomyService Economy { get; }
         public IIapService Iap { get; }
+
         public string Status { get; private set; } = "Ready.";
 
         public GamePresenter()
         {
-            Engine = new GameEngine();
-            Economy = new EconomyService(new LocalPlayerData());
+            Engine = new GameEngine(
+                "SimpleCardGame",
+                startingPlayerId: 0);
+
+            Economy = new EconomyService(
+                new LocalPlayerData());
+
             Iap = new MockIapService();
         }
 
         public void StartMatch()
         {
             string error;
+
             if (!Economy.TryStartMatch(out error))
             {
                 Status = error;
@@ -37,10 +43,16 @@ namespace CardGame.Presentation.Game
             Status = "Match started. Choose a card.";
         }
 
-        public void PlayerAction(GameActionType action)
+        public void PlayerAction(GameAction action)
         {
-            if (Engine.TryPlayerAction(action))
+            if (Engine.SubmitAction(action))
+            {
                 Status = "Action resolved.";
+            }
+            else
+            {
+                Status = "Action rejected.";
+            }
         }
 
         public void BuyCoins()
@@ -50,9 +62,12 @@ namespace CardGame.Presentation.Game
                 if (result.Success)
                 {
                     Economy.GrantCoins(result.CoinsGranted);
-                    Status = result.Message + " +" +
-                             result.CoinsGranted +
-                             " coins.";
+
+                    Status =
+                        result.Message +
+                        " +" +
+                        result.CoinsGranted +
+                        " coins.";
                 }
                 else
                 {
