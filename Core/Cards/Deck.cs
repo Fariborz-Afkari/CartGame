@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 
 namespace CardGame.Core.Cards
@@ -46,6 +46,26 @@ namespace CardGame.Core.Cards
         }
 
         /// <summary>
+        /// Randomizes the order of the cards in the deck.
+        /// </summary>
+        public void Shuffle(Random random = null)
+        {
+            if (_cards.Count < 2)
+                return;
+
+            random = random ?? new Random();
+
+            for (int i = _cards.Count - 1; i > 0; i--)
+            {
+                int j = random.Next(i + 1);
+
+                Card temporary = _cards[i];
+                _cards[i] = _cards[j];
+                _cards[j] = temporary;
+            }
+        }
+
+        /// <summary>
         /// Draws the top card from the deck.
         ///
         /// The last item is treated as the top of the deck.
@@ -81,4 +101,3 @@ namespace CardGame.Core.Cards
         }
     }
 }
-
