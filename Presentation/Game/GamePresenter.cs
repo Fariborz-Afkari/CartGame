@@ -65,6 +65,7 @@ namespace CardGame.Presentation.Game
 
         private readonly GameEngine _engine;
         private readonly GameFlowController _flowController;
+        private const int CoinsPerPurchase = 10;
 
         public IEconomyService Economy { get; }
         public IIapService Iap { get; }
@@ -345,7 +346,7 @@ namespace CardGame.Presentation.Game
         public void BuyCoins()
         {
             Iap.PurchaseCoins(
-                100,
+                CoinsPerPurchase,
                 success =>
                 {
                     if (!success)
@@ -355,7 +356,9 @@ namespace CardGame.Presentation.Game
                         return;
                     }
 
-                    Economy.GrantCoins(100);
+                    Economy.GrantCoins(
+                        CoinsPerPurchase);
+
                     Status = "Coins purchased.";
                     NotifyChanged();
                 });
