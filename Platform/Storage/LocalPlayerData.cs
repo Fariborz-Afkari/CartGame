@@ -4,23 +4,29 @@ namespace CardGame.Platform.Storage
 {
     public sealed class LocalPlayerData
     {
-        private const string CoinsKey = "cardgame.coins";
-        private const int DefaultCoins = 5;
+        private const string CoinsKey = "CardGame.Coins";
 
         public int LoadCoins()
         {
-            return PlayerPrefs.GetInt(CoinsKey, DefaultCoins);
+            return PlayerPrefs.GetInt(
+                CoinsKey,
+                10);
         }
 
         public void SaveCoins(int coins)
         {
-            PlayerPrefs.SetInt(CoinsKey, coins < 0 ? 0 : coins);
+            PlayerPrefs.SetInt(
+                CoinsKey,
+                coins);
+
             PlayerPrefs.Save();
         }
 
-        public void Reset()
+        public void Clear()
         {
-            PlayerPrefs.DeleteKey(CoinsKey);
+            PlayerPrefs.DeleteKey(
+                CoinsKey);
+
             PlayerPrefs.Save();
         }
     }
