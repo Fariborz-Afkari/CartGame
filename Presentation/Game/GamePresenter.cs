@@ -110,14 +110,23 @@ namespace CardGame.Presentation.Game
         // Match
         // --------------------------------------------------
 
+        // --------------------------------------------------
+        // Match
+        // --------------------------------------------------
+
         public void StartMatch()
         {
             bool started =
-                Economy.TryStartMatch();
+                Economy.TryStartMatch(
+                    out string error);
 
             if (!started)
             {
-                Status = "Cannot start match.";
+                Status =
+                    string.IsNullOrEmpty(error)
+                        ? "Cannot start match."
+                        : error;
+
                 NotifyChanged();
                 return;
             }
@@ -126,7 +135,8 @@ namespace CardGame.Presentation.Game
                 SimpleCardGameRules.CreateDeck(),
                 SimpleCardGameRules.StartingHandSize);
 
-            Status = "Match started. Choose a card.";
+            Status =
+                "Match started. Choose a card.";
 
             NotifyChanged();
         }
