@@ -1,71 +1,282 @@
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
+using CardGame.Core.Cards;
 using CardGame.Core.Game;
-using CardGame.Core.Players;
-using CardGame.Presentation.Game;
 
-namespace CardGame.Presentation.UI
+namespace CardGame.Presentation.Game
 {
     public sealed class GameUi : MonoBehaviour
     {
-        private GamePresenter presenter;
-        private Vector2 scroll;
+        [Header("References")]
+        [SerializeField]
+        private GamePresenter _presenter;
 
-        public void Initialize(GamePresenter value) => presenter = value;
+        [SerializeField]
+        private Transform _handContainer;
 
-        private void OnGUI()
+        [SerializeField]
+        private GameObject _cardButtonPrefab;
+
+        [SerializeField]
+        private Button _drawButton;
+
+        [SerializeField]
+        private Button _endTurnButton;
+
+        [SerializeField]
+        private Text _statusText;
+
+        [Header("Target Selection")]
+        [SerializeField]
+        private GameObject _targetPanel;
+
+        [SerializeField]
+        private Transform _targetContainer;
+
+        [SerializeField]
+        private GameObject _targetButtonPrefab;
+
+        private Card _selectedCard;
+
+        private void Awake()
         {
-            if (presenter == null) return;
-            GUI.skin.label.fontSize = 18;
-            GUI.skin.button.fontSize = 18;
-            GUI.skin.box.fontSize = 18;
+            if (_presenter == null)
+                _presenter = new GamePresenter();
 
-            GUILayout.BeginArea(new Rect(24, 18, Screen.width - 48, Screen.height - 36));
-            GUILayout.Label("Reusable 2D Card Game — Offline Skeleton", GUI.skin.box);
-            GUILayout.Label("Coins: " + presenter.Economy.Coins + "    Status: " + presenter.Status);
+            if (_drawButton != null)
+                _drawButton.onClick.AddListener(OnDrawCardClicked);
 
-            DrawPlayers();
+            if (_endTurnButton != null)
+                _endTurnButton.onClick.AddListener(OnEndTurnClicked);
 
-            GUILayout.Space(10);
-            if (presenter.Engine.State.Phase == GamePhase.Lobby || presenter.Engine.State.Phase == GamePhase.GameOver)
-            {
-                string label = presenter.Engine.State.Phase == GamePhase.GameOver ? "Play Again (1 Coin)" : "Start Match (1 Coin)";
-                if (GUILayout.Button(label, GUILayout.Height(48))) presenter.StartMatch();
-            }
-            else
-            {
-                GUILayout.Label("Your hand:");
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("Attack\n3 damage", GUILayout.Height(70))) presenter.PlayerAction(GameActionType.Attack);
-                if (GUILayout.Button("Heal\n2 HP", GUILayout.Height(70))) presenter.PlayerAction(GameActionType.Heal);
-                if (GUILayout.Button("Guard\n50% damage", GUILayout.Height(70))) presenter.PlayerAction(GameActionType.Guard);
-                GUILayout.EndHorizontal();
-            }
-
-            GUILayout.Space(8);
-            if (GUILayout.Button("Mock IAP — Buy 10 Coins", GUILayout.Height(42))) presenter.BuyCoins();
-            GUILayout.Label("Real Unity IAP can later implement IIapService without changing Core game rules.");
-
-            GUILayout.Label("Recent events:");
-            scroll = GUILayout.BeginScrollView(scroll, GUILayout.Height(150));
-            foreach (var line in presenter.Engine.State.Log) GUILayout.Label("• " + line);
-            GUILayout.EndScrollView();
-            GUILayout.EndArea();
+            HideTargetPanel();
         }
 
-        private void DrawPlayers()
+        public void StartGame()
         {
-            if (presenter.Engine.State.Players.Count == 0)
+            _presenter.StartMatch();
+
+            Refresh();
+        }
+
+        public void Refresh()
+        {
+            RefreshHand();
+            RefreshStatus();
+        }
+
+        private void RefreshHand()
+        {
+            ClearContainer(_handContainer);
+
+            IReadOnlyList<Card> hand =
+                _presenter.GetPlayerHand();
+
+            for (int i = 0; i < hand.Count; i++)
             {
-                GUILayout.Label("No active match. Start one to play.");
+                CreateCardButton(hand[i]);
+            }
+        }
+
+        private void CreateCardButton(Card card)
+        {
+            if (_cardButtonPrefab == null ||
+                _handContainer == null)
+            {
                 return;
             }
 
-            for (int i = 0; i < presenter.Engine.State.Players.Count; i++)
+            GameObject buttonObject =
+                Instantiate(
+                    _cardButtonPrefab,
+                    _handContainer);
+
+            Button button =
+                buttonObject.GetComponent<Button>();
+
+            Text label =
+                buttonObject.GetComponentInChildren<Text>();
+
+            if (label != null)
             {
-                PlayerState p = presenter.Engine.State.Players[i];
-                string guard = p.Guarding ? " [Guarding]" : string.Empty;
-                GUILayout.Label(p.Name + ": " + p.Health + "/" + p.MaxHealth + guard);
+                label.text =
+                    card.Definition.Name +
+                    "\n" +
+                    "Value: " +
+                    card.Definition.Value;
             }
+
+            if (button != null)
+            {
+                button.onClick.AddListener(
+                    () => OnCardClicked(card));
+            }
+        }
+
+        private void OnCardClicked(Card card)
+        {
+            if (card == null)
+                return;
+
+            _selectedCard = card;
+
+            switch (card.Definition.Effect)
+            {
+                case CardEffect.Damage:
+                    ShowTargetPanel();
+                    break;
+
+                case CardEffect.Heal:
+                case CardEffect.Guard:
+                    PlaySelectedCard(null);
+                    break;
+
+                default:
+                    _selectedCard = null;
+                    break;
+            }
+        }
+
+        private void ShowTargetPanel()
+        {
+            if (_targetPanel != null)
+                _targetPanel.SetActive(true);
+
+            ClearContainer(_targetContainer);
+
+            for (int i = 0;
+                 i < _presenter.Engine.State.Players.Count;
+                 i++)
+            {
+                var player =
+                    _presenter.Engine.State.Players[i];
+
+                if (player.Id == 0)
+                    continue;
+
+                if (player.Health <= 0)
+                    continue;
+
+                CreateTargetButton(
+                    player.Id,
+                    player.Name);
+            }
+        }
+
+        private void CreateTargetButton(
+            int playerId,
+            string playerName)
+        {
+            if (_targetButtonPrefab == null ||
+                _targetContainer == null)
+            {
+                return;
+            }
+
+            GameObject buttonObject =
+                Instantiate(
+                    _targetButtonPrefab,
+                    _targetContainer);
+
+            Button button =
+                buttonObject.GetComponent<Button>();
+
+            Text label =
+                buttonObject.GetComponentInChildren<Text>();
+
+            if (label != null)
+                label.text = playerName;
+
+            if (button != null)
+            {
+                button.onClick.AddListener(
+                    () => OnTargetSelected(playerId));
+            }
+        }
+
+        private void OnTargetSelected(
+            int targetPlayerId)
+        {
+            PlaySelectedCard(targetPlayerId);
+        }
+
+        private void PlaySelectedCard(
+            int? targetPlayerId)
+        {
+            if (_selectedCard == null)
+                return;
+
+            int cardId =
+                _selectedCard.InstanceId;
+
+            HideTargetPanel();
+
+            bool success =
+                _presenter.PlayCard(
+                    cardId,
+                    targetPlayerId);
+
+            _selectedCard = null;
+
+            if (success)
+                Refresh();
+            else
+                RefreshStatus();
+        }
+
+        private void OnDrawCardClicked()
+        {
+            if (_presenter.DrawCard())
+                Refresh();
+            else
+                RefreshStatus();
+        }
+
+        private void OnEndTurnClicked()
+        {
+            _presenter.EndTurn();
+
+            Refresh();
+        }
+
+        private void RefreshStatus()
+        {
+            if (_statusText != null)
+                _statusText.text =
+                    _presenter.Status;
+        }
+
+        private void HideTargetPanel()
+        {
+            if (_targetPanel != null)
+                _targetPanel.SetActive(false);
+        }
+
+        private void ClearContainer(
+            Transform container)
+        {
+            if (container == null)
+                return;
+
+            for (int i = container.childCount - 1;
+                 i >= 0;
+                 i--)
+            {
+                Destroy(
+                    container.GetChild(i).gameObject);
+            }
+        }
+
+        private void OnDestroy()
+        {
+            if (_drawButton != null)
+                _drawButton.onClick.RemoveListener(
+                    OnDrawCardClicked);
+
+            if (_endTurnButton != null)
+                _endTurnButton.onClick.RemoveListener(
+                    OnEndTurnClicked);
         }
     }
 }
