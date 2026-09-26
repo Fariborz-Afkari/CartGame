@@ -4,11 +4,19 @@ namespace CardGame.Platform.Iap
 {
     public sealed class MockIapService : IIapService
     {
-        public const string ProductId = "coins_10";
-
-        public void PurchaseCoins(Action<PurchaseResult> completed)
+        public void PurchaseCoins(
+            int amount,
+            Action<bool> completed)
         {
-            completed?.Invoke(new PurchaseResult(true, ProductId, 10, "Mock purchase completed."));
+            if (amount <= 0)
+            {
+                completed?.Invoke(false);
+                return;
+            }
+
+            // Mock purchase:
+            // Always succeeds for now.
+            completed?.Invoke(true);
         }
     }
 }
