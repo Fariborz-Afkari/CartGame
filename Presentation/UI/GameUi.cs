@@ -20,7 +20,7 @@ namespace CardGame.Presentation.UI
 
         [Header("Actions")]
         [SerializeField]
-        private Button _drawButton;
+        private Button _startButton;
 
         [SerializeField]
         private Button _endTurnButton;
@@ -40,18 +40,23 @@ namespace CardGame.Presentation.UI
         private Button _targetButtonPrefab;
 
         private int? _selectedCardId;
+        [SerializeField] private TMP_Text _coinsText;
+        [SerializeField] private Button _buyCoinsButton;
 
         private void Awake()
         {
             if (_presenter == null)
                 _presenter = new GamePresenter();
 
-            _drawButton.onClick.AddListener(
+            _startButton.onClick.AddListener(
                 OnDrawClicked);
 
             _endTurnButton.onClick.AddListener(
                 OnEndTurnClicked);
-
+            if (_buyCoinsButton != null)
+            {
+                _buyCoinsButton.onClick.AddListener(OnBuyCoinsClicked);
+            }
             HideTargetPanel();
         }
 
@@ -74,11 +79,15 @@ namespace CardGame.Presentation.UI
                 _presenter.Dispose();
             }
 
-            _drawButton.onClick.RemoveListener(
+            _startButton.onClick.RemoveListener(
                 OnDrawClicked);
 
             _endTurnButton.onClick.RemoveListener(
                 OnEndTurnClicked);
+            if (_buyCoinsButton != null)
+            {
+                _buyCoinsButton.onClick.RemoveListener(OnBuyCoinsClicked);
+            }
         }
 
         // --------------------------------------------------
@@ -99,6 +108,7 @@ namespace CardGame.Presentation.UI
             RefreshHand();
             RefreshStatus();
             RefreshActions();
+            RefreshEconomy();
         }
 
         private void RefreshHand()
@@ -132,11 +142,28 @@ namespace CardGame.Presentation.UI
                 _presenter.IsPlayerTurn &&
                 !_presenter.IsGameOver;
 
-            _drawButton.interactable =
+            _startButton.interactable =
                 canPlay;
 
             _endTurnButton.interactable =
                 canPlay;
+        }
+        private void RefreshEconomy()
+        {
+            if (_coinsText != null)
+            {
+                _coinsText.text = "Coins: " + _presenter.Coins;
+            }
+
+            if (_startButton != null)
+            {
+                _startButton.interactable = _presenter.CanStartMatch;
+            }
+
+            if (_buyCoinsButton != null)
+            {
+                _buyCoinsButton.interactable = true;
+            }
         }
 
         // --------------------------------------------------
@@ -294,6 +321,10 @@ namespace CardGame.Presentation.UI
             _presenter.EndTurn();
         }
 
+        private void OnBuyCoinsClicked()
+        {
+            _presenter.BuyCoins();
+        }
         // --------------------------------------------------
         // Utility
         // --------------------------------------------------
