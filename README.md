@@ -413,6 +413,24 @@ Games/
     └── Presentation assets
 ~~~
 
+**** GameUI To GameState
+GameUi
+   ↓
+GamePresenter
+   ↓
+GameFlowController
+   ↓
+BasicAiStrategy
+   ↓
+GameAction
+   ↓
+GameEngine
+   ↓
+GameRules
+   ↓
+GameState
+*******
+
 The reusable Core should continue to provide:
 
 - State management.
