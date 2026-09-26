@@ -1,9 +1,12 @@
 using CardGame.Core.Game;
+using CardGame.Core.Players;
 
 namespace CardGame.Core.AI
 {
-    public interface IAiStrategy
+    public interface IAIStrategy
     {
-        GameActionType ChooseAction(GameState state, int playerId);
+        GameAction DecideAction(
+            GameState state,
+            PlayerState actor);
     }
 }
