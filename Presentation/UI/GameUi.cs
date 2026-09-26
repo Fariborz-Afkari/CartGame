@@ -1,31 +1,33 @@
-using System.Collections.Generic;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
-using CardGame.Core.Cards;
-using CardGame.Core.Game;
+using CardGame.Presentation.Game;
 
-namespace CardGame.Presentation.Game
+namespace CardGame.Presentation.UI
 {
     public sealed class GameUi : MonoBehaviour
     {
-        [Header("References")]
+        [Header("Presenter")]
         [SerializeField]
         private GamePresenter _presenter;
 
+        [Header("Hand")]
         [SerializeField]
         private Transform _handContainer;
 
         [SerializeField]
-        private GameObject _cardButtonPrefab;
+        private Button _cardButtonPrefab;
 
+        [Header("Actions")]
         [SerializeField]
         private Button _drawButton;
 
         [SerializeField]
         private Button _endTurnButton;
 
+        [Header("Status")]
         [SerializeField]
-        private Text _statusText;
+        private TMP_Text _statusText;
 
         [Header("Target Selection")]
         [SerializeField]
@@ -35,223 +37,266 @@ namespace CardGame.Presentation.Game
         private Transform _targetContainer;
 
         [SerializeField]
-        private GameObject _targetButtonPrefab;
+        private Button _targetButtonPrefab;
 
-        private Card _selectedCard;
+        private int? _selectedCardId;
 
         private void Awake()
         {
             if (_presenter == null)
                 _presenter = new GamePresenter();
 
-            if (_drawButton != null)
-                _drawButton.onClick.AddListener(OnDrawCardClicked);
+            _drawButton.onClick.AddListener(
+                OnDrawClicked);
 
-            if (_endTurnButton != null)
-                _endTurnButton.onClick.AddListener(OnEndTurnClicked);
+            _endTurnButton.onClick.AddListener(
+                OnEndTurnClicked);
 
             HideTargetPanel();
         }
 
+        private void OnEnable()
+        {
+            if (_presenter != null)
+                _presenter.Changed += Refresh;
+        }
+
+        private void Start()
+        {
+            StartGame();
+        }
+
+        private void OnDestroy()
+        {
+            if (_presenter != null)
+            {
+                _presenter.Changed -= Refresh;
+                _presenter.Dispose();
+            }
+
+            _drawButton.onClick.RemoveListener(
+                OnDrawClicked);
+
+            _endTurnButton.onClick.RemoveListener(
+                OnEndTurnClicked);
+        }
+
+        // --------------------------------------------------
+        // Match
+        // --------------------------------------------------
+
         public void StartGame()
         {
             _presenter.StartMatch();
-
-            Refresh();
         }
 
-        public void Refresh()
+        // --------------------------------------------------
+        // Refresh
+        // --------------------------------------------------
+
+        private void Refresh()
         {
             RefreshHand();
             RefreshStatus();
+            RefreshActions();
         }
 
         private void RefreshHand()
         {
-            ClearContainer(_handContainer);
+            ClearContainer(
+                _handContainer);
 
-            IReadOnlyList<Card> hand =
+            var cards =
                 _presenter.GetPlayerHand();
 
-            for (int i = 0; i < hand.Count; i++)
+            for (int i = 0;
+                 i < cards.Count;
+                 i++)
             {
-                CreateCardButton(hand[i]);
+                CreateCardButton(cards[i]);
             }
         }
 
-        private void CreateCardButton(Card card)
+        private void RefreshStatus()
         {
-            if (_cardButtonPrefab == null ||
-                _handContainer == null)
-            {
+            if (_statusText == null)
                 return;
-            }
 
-            GameObject buttonObject =
+            _statusText.text =
+                _presenter.Status;
+        }
+
+        private void RefreshActions()
+        {
+            bool canPlay =
+                _presenter.IsPlayerTurn &&
+                !_presenter.IsGameOver;
+
+            _drawButton.interactable =
+                canPlay;
+
+            _endTurnButton.interactable =
+                canPlay;
+        }
+
+        // --------------------------------------------------
+        // Hand
+        // --------------------------------------------------
+
+        private void CreateCardButton(
+            GamePresenter.CardViewData card)
+        {
+            Button button =
                 Instantiate(
                     _cardButtonPrefab,
                     _handContainer);
 
-            Button button =
-                buttonObject.GetComponent<Button>();
+            TMP_Text text =
+                button.GetComponentInChildren<TMP_Text>();
 
-            Text label =
-                buttonObject.GetComponentInChildren<Text>();
-
-            if (label != null)
+            if (text != null)
             {
-                label.text =
-                    card.Definition.Name +
-                    "\n" +
-                    "Value: " +
-                    card.Definition.Value;
+                text.text =
+                    card.Value > 0
+                        ? $"{card.Name} ({card.Value})"
+                        : card.Name;
             }
 
-            if (button != null)
-            {
-                button.onClick.AddListener(
-                    () => OnCardClicked(card));
-            }
+            int cardId =
+                card.InstanceId;
+
+            button.onClick.AddListener(
+                () => OnCardClicked(cardId));
         }
 
-        private void OnCardClicked(Card card)
+        private void OnCardClicked(
+            int cardId)
         {
-            if (card == null)
+            if (!_presenter.IsPlayerTurn)
                 return;
 
-            _selectedCard = card;
+            GamePresenter.CardInteraction interaction =
+                _presenter.GetCardInteraction(
+                    cardId);
 
-            switch (card.Definition.Effect)
+            if (interaction.RequiresTarget)
             {
-                case CardEffect.Damage:
-                    ShowTargetPanel();
-                    break;
+                _selectedCardId =
+                    interaction.CardId;
 
-                case CardEffect.Heal:
-                case CardEffect.Guard:
-                    PlaySelectedCard(null);
-                    break;
+                ShowTargetPanel(
+                    interaction.Targets);
 
-                default:
-                    _selectedCard = null;
-                    break;
+                return;
             }
+
+            PlaySelectedCard();
         }
 
-        private void ShowTargetPanel()
-        {
-            if (_targetPanel != null)
-                _targetPanel.SetActive(true);
+        // --------------------------------------------------
+        // Target selection
+        // --------------------------------------------------
 
-            ClearContainer(_targetContainer);
+        private void ShowTargetPanel(
+            System.Collections.Generic.IReadOnlyList<
+                GamePresenter.TargetViewData> targets)
+        {
+            ClearContainer(
+                _targetContainer);
 
             for (int i = 0;
-                 i < _presenter.Engine.State.Players.Count;
+                 i < targets.Count;
                  i++)
             {
-                var player =
-                    _presenter.Engine.State.Players[i];
-
-                if (player.Id == 0)
-                    continue;
-
-                if (player.Health <= 0)
-                    continue;
-
                 CreateTargetButton(
-                    player.Id,
-                    player.Name);
+                    targets[i]);
             }
+
+            _targetPanel.SetActive(true);
         }
 
         private void CreateTargetButton(
-            int playerId,
-            string playerName)
+            GamePresenter.TargetViewData target)
         {
-            if (_targetButtonPrefab == null ||
-                _targetContainer == null)
-            {
-                return;
-            }
-
-            GameObject buttonObject =
+            Button button =
                 Instantiate(
                     _targetButtonPrefab,
                     _targetContainer);
 
-            Button button =
-                buttonObject.GetComponent<Button>();
+            TMP_Text text =
+                button.GetComponentInChildren<TMP_Text>();
 
-            Text label =
-                buttonObject.GetComponentInChildren<Text>();
+            if (text != null)
+                text.text = target.PlayerName;
 
-            if (label != null)
-                label.text = playerName;
+            int playerId =
+                target.PlayerId;
 
-            if (button != null)
-            {
-                button.onClick.AddListener(
-                    () => OnTargetSelected(playerId));
-            }
+            button.onClick.AddListener(
+                () => OnTargetSelected(playerId));
         }
 
         private void OnTargetSelected(
             int targetPlayerId)
         {
-            PlaySelectedCard(targetPlayerId);
-        }
-
-        private void PlaySelectedCard(
-            int? targetPlayerId)
-        {
-            if (_selectedCard == null)
+            if (!_selectedCardId.HasValue)
                 return;
 
-            int cardId =
-                _selectedCard.InstanceId;
-
-            HideTargetPanel();
-
-            bool success =
-                _presenter.PlayCard(
-                    cardId,
-                    targetPlayerId);
-
-            _selectedCard = null;
-
-            if (success)
-                Refresh();
-            else
-                RefreshStatus();
-        }
-
-        private void OnDrawCardClicked()
-        {
-            if (_presenter.DrawCard())
-                Refresh();
-            else
-                RefreshStatus();
-        }
-
-        private void OnEndTurnClicked()
-        {
-            _presenter.EndTurn();
-
-            Refresh();
-        }
-
-        private void RefreshStatus()
-        {
-            if (_statusText != null)
-                _statusText.text =
-                    _presenter.Status;
+            PlaySelectedCard(
+                targetPlayerId);
         }
 
         private void HideTargetPanel()
         {
+            _selectedCardId = null;
+
             if (_targetPanel != null)
                 _targetPanel.SetActive(false);
         }
+
+        // --------------------------------------------------
+        // Card play
+        // --------------------------------------------------
+
+        private void PlaySelectedCard(
+            int? targetPlayerId = null)
+        {
+            if (!_selectedCardId.HasValue)
+                return;
+
+            int cardId =
+                _selectedCardId.Value;
+
+            HideTargetPanel();
+
+            _presenter.PlayCard(
+                cardId,
+                targetPlayerId);
+        }
+
+        // --------------------------------------------------
+        // Actions
+        // --------------------------------------------------
+
+        private void OnDrawClicked()
+        {
+            if (!_presenter.IsPlayerTurn)
+                return;
+
+            _presenter.DrawCard();
+        }
+
+        private void OnEndTurnClicked()
+        {
+            if (!_presenter.IsPlayerTurn)
+                return;
+
+            _presenter.EndTurn();
+        }
+
+        // --------------------------------------------------
+        // Utility
+        // --------------------------------------------------
 
         private void ClearContainer(
             Transform container)
@@ -266,17 +311,6 @@ namespace CardGame.Presentation.Game
                 Destroy(
                     container.GetChild(i).gameObject);
             }
-        }
-
-        private void OnDestroy()
-        {
-            if (_drawButton != null)
-                _drawButton.onClick.RemoveListener(
-                    OnDrawCardClicked);
-
-            if (_endTurnButton != null)
-                _endTurnButton.onClick.RemoveListener(
-                    OnEndTurnClicked);
         }
     }
 }
