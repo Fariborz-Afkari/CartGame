@@ -1,98 +1,25 @@
+using System;
+
 namespace CardGame.Core.Game
 {
     /// <summary>
-    /// Defines the types of events that can be produced by the game engine.
+    /// Represents a domain event produced by the game engine.
     ///
-    /// A GameEvent represents something that has already happened.
-    /// It is not a command and must not contain game logic.
-    /// </summary>
-    public enum GameEventType
-    {
-        /// <summary>
-        /// A new match has started.
-        /// </summary>
-        MatchStarted = 0,
-
-        /// <summary>
-        /// A player's turn has started.
-        /// </summary>
-        TurnStarted = 1,
-
-        /// <summary>
-        /// A player has drawn a card.
-        /// </summary>
-        CardDrawn = 2,
-
-        /// <summary>
-        /// A player has played a card.
-        /// </summary>
-        CardPlayed = 3,
-
-        /// <summary>
-        /// A player's turn has ended.
-        /// </summary>
-        TurnEnded = 4,
-
-        /// <summary>
-        /// The match has ended.
-        /// </summary>
-        MatchEnded = 5,
-
-        /// <summary>
-        /// A coin was consumed by a player.
-        /// </summary>
-        CoinConsumed = 6,
-
-        /// <summary>
-        /// An action was rejected by the game engine.
-        /// </summary>
-        ActionRejected = 7
-    }
-
-    /// <summary>
-    /// Represents an event produced by the game engine.
-    ///
-    /// GameEvent is immutable and contains information about
-    /// an event that has already happened.
-    ///
-    /// Events can be consumed by Presentation, UI, audio,
-    /// animation, logging or other external systems.
+    /// GameEvent describes something that has already happened.
     /// </summary>
     public readonly struct GameEvent
     {
-        /// <summary>
-        /// Type of the event.
-        /// </summary>
         public GameEventType Type { get; }
 
-        /// <summary>
-        /// Identifier of the player associated with the event.
-        ///
-        /// A value of -1 means that the event is not associated
-        /// with a specific player.
-        /// </summary>
         public int PlayerId { get; }
 
-        /// <summary>
-        /// Optional identifier of the card associated with the event.
-        /// </summary>
         public int? CardId { get; }
 
-        /// <summary>
-        /// Optional identifier of the target player associated
-        /// with the event.
-        /// </summary>
         public int? TargetPlayerId { get; }
 
-        /// <summary>
-        /// Human-readable description of the event.
-        /// </summary>
         public string Message { get; }
 
-        /// <summary>
-        /// Creates a new game event.
-        /// </summary>
-        public GameEvent(
+        private GameEvent(
             GameEventType type,
             int playerId = -1,
             int? cardId = null,
@@ -109,12 +36,11 @@ namespace CardGame.Core.Game
         /// <summary>
         /// Creates a MatchStarted event.
         /// </summary>
-        public static GameEvent MatchStarted(
-            string message = "Match started.")
+        public static GameEvent MatchStarted(string message = null)
         {
             return new GameEvent(
                 GameEventType.MatchStarted,
-                message: message);
+                message: message ?? "Match started.");
         }
 
         /// <summary>
@@ -179,27 +105,15 @@ namespace CardGame.Core.Game
         /// Creates a MatchEnded event.
         /// </summary>
         public static GameEvent MatchEnded(
-            int? winnerPlayerId = null,
+            int? winnerId = null,
             string message = null)
         {
             return new GameEvent(
                 GameEventType.MatchEnded,
-                playerId: winnerPlayerId ?? -1,
+                playerId: winnerId ?? -1,
                 message: message ?? "Match ended.");
         }
 
-        /// <summary>
-        /// Creates an ActionRejected event.
-        /// </summary>
-        public static GameEvent ActionRejected(
-            int playerId,
-            string message)
-        {
-            return new GameEvent(
-                GameEventType.ActionRejected,
-                playerId: playerId,
-                message: message);
-        }
         /// <summary>
         /// Creates a CoinConsumed event.
         /// </summary>
@@ -212,9 +126,38 @@ namespace CardGame.Core.Game
                 playerId: playerId,
                 message: message ?? "Coin consumed.");
         }
+
+        /// <summary>
+        /// Creates an ActionRejected event.
+        /// </summary>
+        public static GameEvent ActionRejected(
+            int playerId,
+            string message)
+        {
+            return new GameEvent(
+                GameEventType.ActionRejected,
+                playerId: playerId,
+                message: message ?? "Action rejected.");
+        }
+
         public override string ToString()
         {
             return Message;
         }
+    }
+
+    /// <summary>
+    /// Identifies the type of a game event.
+    /// </summary>
+    public enum GameEventType
+    {
+        MatchStarted = 0,
+        TurnStarted = 1,
+        CardDrawn = 2,
+        CardPlayed = 3,
+        TurnEnded = 4,
+        MatchEnded = 5,
+        CoinConsumed = 6,
+        ActionRejected = 7
     }
 }
